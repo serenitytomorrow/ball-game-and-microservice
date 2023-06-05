@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Game Page</title>
+  <style>
+    .container {
+      max-width: 400px;
+      margin: 0 auto;
+      padding: 20px;
+      border: 1px solid #ccc;
+      text-align: center;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+    table {
+      width: 100%;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #f2f2f2;
+    }
+    body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      #canvas {
+        display: block;
+        background-color: #000000;
+      }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="800" height="600"></canvas>
+      <title>My Game</title>
+    <script>
+
+// Global Constants
+const GAME_FRAME_RATE = 50;
+const MAP_WIDTH = 800;
+const MAP_HEIGHT = 600;
+const SQUARE_SIZE = 20;
+const MAP_ROWS = MAP_HEIGHT / SQUARE_SIZE;
+const MAP_COLS = MAP_WIDTH / SQUARE_SIZE;
+const BALL_RADIUS = 10;
+const BALL_SPEED = GAME_FRAME_RATE / 300;
+const POINTER_RADIUS = 10;
+const POINTER_COLOR = 'red';
+const TRAIL_COLOR = 'gray';
+const USER_SPEED = 1;
+const UPGRADE_LEVEL = 80;
+const SECOND_LEVEL = 1.1;
+
+
+// Global Variables
+const canvas = document.getElementById('canvas');
+const context = canvas.getContext('2d');
+let ctx = context;
+let map = [];
+let userPointer;
+let ball;
+let gamePaused = false;
+let score = 0;
+let countNewFilledSquares = 0;
+let userKey = {key: "", arrowpressed: false};
+let counterUserFrames=5;
+    
+// Initialize game
+// creates a two-dimensional array representing the game map. The boundary squares are initialized to 1, and the inner squares are initialized to 0.
+function initMap() {
+  map = [];
+  score = 0;
+  countNewFilledSquares = 0;
+// Populate the map with squares
+    for (let y = 0; y < MAP_ROWS; y++) {
+      const row = [];
+      for (let x = 0; x < MAP_COLS; x++) {
+        if (x === 0 || x === MAP_COLS - 1 || y === 0 || y === MAP_ROWS - 1) {
+          row.push(1); // 1 represents a full square
+        } else {
+          row.push(0); // 0 represents an empty square
+        }
+      }
+      map.push(row);
+    }
+  userPointer = {x:0, y:0}
+  
+  let dx = Math.random() > 0.5 ? Math.random() : -1 * Math.random();
+  let dy = Math.sqrt(BALL_SPEED * BALL_SPEED - dx * dx);
+  dy = dy * Math.random() > 0.5 ? 1 : -1;
+  
+  ball = {
+  x: Math.floor(Math.random() * (MAP_WIDTH  - SQUARE_SIZE)) + SQUARE_SIZE,
+  y: Math.floor(Math.random() * (MAP_HEIGHT - SQUARE_SIZE)) + SQUARE_SIZE,
+  dx: dx,
+  dy: dy,
+  speed: BALL_SPEED,
+  };
+  initDrawBall();
+}
+
+
+
+// Draw the map
+// iterates over the two-dimensional map array and draws the squares on the canvas based on their value. If a square has a value of 1, it is drawn as a black square. If it has a value of 0, it is drawn as a white square.
+function drawMap() {
+  for (let i = 0; i < MAP_ROWS; i++) {
+    for (let j = 0; j < MAP_COLS; j++) {
+      if (map[i][j] === 1 || map[i][j] === 2) {
+        ctx.fillStyle = "cyan";
+      } else
+      {
+        ctx.fillStyle = "#FFF";
+      }
+      ctx.fillRect(j * SQUARE_SIZE, i * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+    }
+  }
+}
+
+// Move the user pointer
+// variables isCenterRow and isCenterCol check if the new position is in the center of a row or column. condition check if the new position is within a full square. If the new position is not in the center of a row or column, or if it's within a full square, we return early and do not update the user pointer position. If the user pointer is in an empty square and the drawing flag is set, we call the drawSquare function to draw a new square and update the map array.
+function moveUserPointer(direction) {
+  let newY = userPointer.y;
+  let newX = userPointer.x;
+
+// calculate the new row and column of the user pointer
+  switch (direction) {
+    case "ArrowUp":
+      newY = userPointer.y-1;
+      break;
+    case "ArrowDown":
+      newY = userPointer.y+1;
+      break;
+    case "ArrowLeft":
+      newX = userPointer.x-1;
+      break;
+    case "ArrowRight":
+      newX = userPointer.x+1;
+      break;
+    default:
+      return;
+  }
+
+  // check if the new position is within the map boundaries
+  if (newY < 0 || newY >= MAP_HEIGHT - 1 || newX < 0 || newX >= MAP_WIDTH - 1) {
+    return;
+  }
+
+  if( map[newY][newX] == 2 ){
+    // update the user pointer position
+    return;
+  }
+  
+
+  // check if the new position is within a full square
+  if( map[newY][newX] === 1 ){
+    if( map[userPointer.y][userPointer.x] === 1 ){//check if previous square was full too
+      userPointer = {y: newY, x: newX};
+      return;
+    }
+    //previous square was vulnerable. turn them to full and fill area:
+    //first find path from ball to newly drawn line:
+    
+    const visited = visitConnectedEmptySquares();
+
+    //fillSquaresInEnclosedArea();
+    for (let r = 0; r < MAP_ROWS; r++) {
+      for (let c = 0; c < MAP_COLS; c++) {
+        if(!visited[r][c] || map[r][c]===2){
+          if(map[r][c] === 0){countNewFilledSquares++;}
+          map[r][c] = 1;
+          score++;
+        }
+      }
+    }
+    if(countNewFilledSquares> UPGRADE_LEVEL){
+      const newBallSpeed= ball.speed * SECOND_LEVEL;
+      const newBallDx = ball.dx * newBallSpeed / ball.speed;
+      const newBallDy = ball.dy * newBallSpeed / ball.speed;
+      ball.dx=newBallDx;//Math.sqrt(newBallSpeed * ball.speed - newBallDy * newBallDy);
+      ball.dy=newBallDy;//Math.sqrt(newBallSpeed * newBallSpeed - newBallDx * newBallDx);
+      ball.speed = newBallSpeed;
+      countNewFilledSquares = 0;
+    }
+    userPointer = {y: newY, x: newX};
+    return;
+  }
+  userPointer = {y: newY, x: newX};
+  map[newY][newX] = 2;
+}
+
+
+
+
+// Initialize the ball shape matrix
+function initUserPointer2() {
+  // Clear the existing matrix
+  userPointer.Shape = [];
+
+  // Calculate the radius squared for easier comparison
+  const radiusSquared = POINTER_RADIUS * POINTER_RADIUS;
+
+  // Loop through the bounding box of the ball shape
+  for (let x = -POINTER_RADIUS; x <= POINTER_RADIUS; x++) {
+    for (let y = -POINTER_RADIUS; y <= POINTER_RADIUS; y++) {
+      // Check if the pixel is within the ball shape
+      if (x * x + y * y <= radiusSquared) {
+        // Store the pixel position relative to the center of the ball
+        userPointer.Shape.push({ x, y });
+      }
+    }
+  }
+}
+
+function drawUserPointer2() {
+  // Clear the existing ball pixels
+  //ctx.clearRect(ballX - BALL_RADIUS, ballY - BALL_RADIUS, BALL_RADIUS * 2, BALL_RADIUS * 2);
+
+  // Loop through the stored ball pixels and draw them at the new position
+  for (const pixel of userPointer.Shape) {
+    const pixelX = userPointer.x + pixel.x;
+    const pixelY = userPointer.y + pixel.y;
+
+    ctx.fillRect(pixelX, pixelY, 1, 1);
+    ctx.fillStyle = "#000";
+  }
+}
+
+// Draw the user pointer
+//  draws the pointer at the center of its current square, and continuously fills in the squares it passes over as it moves, even if it's only partially within them. The offsetX and offsetY variables are used to determine how much of the pointer is in each neighboring square, and if the pointer is close enough to the center of the neighboring square, that square is considered "filled in" as well.
+function drawUserPointer() {
+  const row = Math.floor(userPointer.y / SQUARE_SIZE);
+  const col = Math.floor(userPointer.x / SQUARE_SIZE);
+  const offsetX = (userPointer.x % SQUARE_SIZE) - POINTER_RADIUS / 2;
+  const offsetY = (userPointer.y % SQUARE_SIZE) - POINTER_RADIUS / 2;
+
+  ctx.beginPath();
+  ctx.arc(userPointer.x*SQUARE_SIZE+SQUARE_SIZE/2, userPointer.y*SQUARE_SIZE+SQUARE_SIZE/2, POINTER_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = "#000";
+  ctx.fill();
+  ctx.closePath();
+
+return;
+  // Draw trail
+  context.fillStyle = TRAIL_COLOR;
+  for (let r = 0; r < MAP_ROWS; r++) {
+    for (let c = 0; c < MAP_COLS; c++) {
+      if (map[r][c] === 2) {
+        context.fillRect(c * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+      }
+    }
+  }
+
+  // Draw current square
+  if (map[row][col] !== 1) {
+    map[row][col] = 2;
+  }
+
+  // Draw partial square
+  if (offsetX > 0 && map[row][col + 1] !== 1) {
+    map[row][col + 1] = 2;
+    context.fillRect((col + 1) * SQUARE_SIZE, row * SQUARE_SIZE, offsetX, SQUARE_SIZE);
+  }
+  if (offsetX < 0 && map[row][col - 1] !== 1) {
+    map[row][col - 1] = 2;
+    context.fillRect(col * SQUARE_SIZE, row * SQUARE_SIZE, -offsetX, SQUARE_SIZE);
+  }
+  if (offsetY > 0 && map[row + 1][col] !== 1) {
+    map[row + 1][col] = 2;
+    context.fillRect(col * SQUARE_SIZE, (row + 1) * SQUARE_SIZE, SQUARE_SIZE, offsetY);
+  }
+  if (offsetY < 0 && map[row - 1][col] !== 1) {
+    map[row - 1][col] = 2;
+    context.fillRect(col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, -offsetY);
+  }
+}
+
+
+// Move the ball
+function moveBall() {
+  // Check if the ball collides with any full squares
+  let collided  = false;
+  let dx = ball.dx;
+  let dy = ball.dy;
+  let x = ball.x;
+  let y = ball.y;
+  
+   // Calculate the next position of the ball
+  const nextX = x + dx * ball.speed;
+  const nextY = y + dy * ball.speed;
+  
+    // Check if the next position collides with any full squares
+  const row = Math.floor(nextY / SQUARE_SIZE);
+  const col = Math.floor(nextX / SQUARE_SIZE);
+
+  if (map[row][col] === 2){
+    gameOver();
+    return;
+  }
+  
+  // Check if the next position is out of bounds
+  if (nextX < SQUARE_SIZE + BALL_RADIUS || nextX > MAP_WIDTH - SQUARE_SIZE - BALL_RADIUS)
+  {
+    collided = true;
+    ball.dx = -dx;
+    return;
+  }
+  if (nextY < SQUARE_SIZE + BALL_RADIUS || nextY > MAP_HEIGHT - SQUARE_SIZE - BALL_RADIUS) {
+    collided = true;
+    ball.dy = -dy;
+    return;
+  }
+
+  if (map[row][col] === 1){
+    if (map[row][Math.floor(x / SQUARE_SIZE)] === 0 ){
+      collided = true;
+      ball.dx = -dx;
+    }
+    if (map[Math.floor(y / SQUARE_SIZE)][col] === 0 ){
+      collided = true;
+      ball.dy = -dy;
+    }
+  }
+  // Update the ball's position
+  ball.x += ball.dx * ball.speed;
+  ball.y += ball.dy * ball.speed;
+}
+
+// Initialize the ball shape matrix
+function initDrawBall() {
+  // Clear the existing matrix
+  ball.Shape = [];
+
+  // Calculate the radius squared for easier comparison
+  const radiusSquared = BALL_RADIUS * BALL_RADIUS;
+
+  // Loop through the bounding box of the ball shape
+  for (let x = -BALL_RADIUS; x <= BALL_RADIUS; x++) {
+    for (let y = -BALL_RADIUS; y <= BALL_RADIUS; y++) {
+      // Check if the pixel is within the ball shape
+      if (x * x + y * y <= radiusSquared) {
+        // Store the pixel position relative to the center of the ball
+        ball.Shape.push({ x, y });
+      }
+    }
+  }
+}
+
+function drawBall() {
+  // Clear the existing ball pixels
+  //ctx.clearRect(ball.x - BALL_RADIUS, ball.y - BALL_RADIUS, BALL_RADIUS * 2, BALL_RADIUS * 2);
+
+  // Loop through the stored ball pixels and draw them at the new position
+  for (const pixel of ball.Shape) {
+    const pixelX = ball.x + pixel.x;
+    const pixelY = ball.y + pixel.y;
+
+    ctx.fillRect(pixelX, pixelY, 1, 1);
+    ctx.fillStyle = "#F00";
+  }
+}
+
+// draws the ball on the canvas as a black circle using the arc() method. The ball's position is based on its x and y properties, which are updated in the game loop.
+function drawBall2() {
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, BALL_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = "#F00";
+  ctx.fill();
+  ctx.closePath();
+}
+
+function visitConnectedEmptySquares() {
+  const rows = map.length;
+  const cols = map[0].length;
+
+  const queue = [];
+  const visited = Array(rows).fill().map(() => Array(cols).fill(false));
+
+  queue.push({ x: Math.floor(ball.x / SQUARE_SIZE), y: Math.floor(ball.y / SQUARE_SIZE) });
+  visited[Math.floor(ball.y / SQUARE_SIZE)][Math.floor(ball.x / SQUARE_SIZE)] = true;
+
+  while (queue.length > 0) {
+    const { x, y } = queue.shift();
+
+    // Check if the current square is empty (marked as 0)
+    if (map[y][x] === 0) {
+      // Mark the current square as visited
+      visited[y][x] = true;
+
+      // Check the adjacent squares (up, down, left, right)
+      const neighbors = [
+        { x: x, y: y - 1 }, // up
+        { x: x, y: y + 1 }, // down
+        { x: x - 1, y: y }, // left
+        { x: x + 1, y: y }, // right
+      ];
+
+      for (const neighbor of neighbors) {
+        const { x: nx, y: ny } = neighbor;
+
+        // Check if the adjacent square is within the boundaries and has not been visited
+        if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx] && map[ny][nx] !== 1) {
+          queue.push({ x: nx, y: ny });
+          visited[ny][nx] = true;
+        }
+      }
+    }
+  }
+
+  return visited;
+}
+
+
+function findPathToVulnerableSquare() {
+  const rows = map.length;
+  const cols = map[0].length;
+
+  const queue = [];
+  const visited = Array(rows).fill().map(() => Array(cols).fill(false));
+  let cordsAdjacent = { x: Math.floor(ball.x / SQUARE_SIZE), y: Math.floor(ball.y / SQUARE_SIZE) }
+  let foundPath = false;
+
+  queue.push(cordsAdjacent);
+  visited[Math.floor(ball.y / SQUARE_SIZE)][Math.floor(ball.x / SQUARE_SIZE)] = true;
+
+  while (queue.length > 0) {
+    const { x, y } = queue.shift();
+
+    // Check if the current square is a vulnerable square (marked as 2)
+    if (map[y][x] === 2) {
+      // Path found, break the loop
+      foundPath = true;
+      break;
+    }
+
+    // Check the adjacent squares (up, down, left, right)
+    const neighbors = [
+      { x: x, y: y - 1 }, // up
+      { x: x, y: y + 1 }, // down
+      { x: x - 1, y: y }, // left
+      { x: x + 1, y: y }, // right
+    ];
+
+    for (const neighbor of neighbors) {
+      const { x: nx, y: ny } = neighbor;
+
+      // Check if the adjacent square is within the boundaries and has not been visited
+      if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx] && map[ny][nx] !== 1) {
+        queue.push({ x: nx, y: ny });
+        visited[ny][nx] = true;
+      }
+    }
+  }
+
+  return [foundPath, cordsAdjacent, visited];
+}
+
+
+function fillSquaresInEnclosedArea() {
+  // Create a copy of the map array
+  const copyMap = map.map((row) => [...row]);
+
+  // Initialize a queue with the current square
+  const queue = [{ row: currentRow, col: currentCol }];
+
+  // Mark the current square as visited
+  copyMap[currentRow][currentCol] = 1;
+
+  // Loop through the queue until it's empty
+  while (queue.length > 0) {
+    const { row, col } = queue.shift();
+
+    // Check the neighboring squares
+    const neighbors = [
+      { row: row - 1, col: col }, // top
+      { row: row + 1, col: col }, // bottom
+      { row: row, col: col - 1 }, // left
+      { row: row, col: col + 1 }, // right
+    ];
+
+    for (const { row: r, col: c } of neighbors) {
+      // Check if the neighboring square is inside the map boundaries and not already visited
+      if (r >= 0 && r < ROWS && c >= 0 && c < COLS && copyMap[r][c] === 0) {
+        // Mark the neighboring square as visited and add it to the queue
+        copyMap[r][c] = 1;
+        queue.push({ row: r, col: c });
+      }
+    }
+  }
+
+  // Copy the updated map to the original map
+  map = copyMap;
+}
+
+
+function gameLoop() {
+  if(gamePaused){return;}
+  
+  drawMap();
+  drawBall();
+  
+  counterUserFrames++;
+  if(userKey.arrowpressed && counterUserFrames == 10){
+    moveUserPointer(userKey.key);
+    userKey.arrowpressed = false;
+    counterUserFrames=0;
+  }
+  counterUserFrames = counterUserFrames % 10;
+  
+  drawUserPointer();
+  moveBall();
+
+  requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+  // Stop the game
+  gamePaused = true;
+
+//  let score = 0;
+  //for (let r = 1; r < MAP_ROWS-1; r++) {
+//    for (let c = 1; c < MAP_COLS-1; c++) {
+      //if (map[r][c] === 1) {
+//        score++;
+      //}
+    //}
+  //}
+
+submitScore(score);
+
+  // Show game over message
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "red";
+  ctx.font = "48px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = "yellow";
+  ctx.font = "36px sans-serif";
+  ctx.fillText("Score: " + score, canvas.width / 2, canvas.height / 2 + 50);
+  ctx.font = "24px sans-serif";
+  ctx.fillText("Press space to play again", canvas.width / 2, canvas.height / 2 + 24);
+}
+
+
+// Event listener for arrow key presses
+document.addEventListener("keydown", function (event) {
+  const key = event.key;
+
+  if (key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight") {
+    //moveUserPointer(key);
+    userKey.key = key;
+    userKey.arrowpressed = true;
+  }
+  if (key === " " ){
+    initMap();
+    gamePaused = false;
+  }
+});
+
+
+// Start the game
+initMap();
+// Start the game loop
+setInterval(gameLoop, GAME_FRAME_RATE);
+
+    </script>
+    
+  <div class="container">
+    <h1>Quick Gamer Service Interface</h1>
+    <div>
+      <label for="username">Username:</label>
+      <input type="text" id="username" name="username" placeholder="Enter your username" />
+      <label for="password">Password:</label>
+      <input type="password" id="password" name="password" placeholder="Enter your password" />
+      <button id="loginBtn">Log In</button>
+      <button id="registerBtn">Register</button>
+      <button id="logoutBtn">Log Out</button>
+    </div>
+    <h2>Top Scores</h2>
+    <table id="topScoreTable">
+  <thead>
+    <tr>
+      <th>Username</th>
+      <th>Score</th>
+      <th>Time</th>
+    </tr>
+  </thead>
+  <tbody id="topScoreTbody"></tbody>
+  </table>
+      <h2>Latest Scores</h2>
+    <table id="lastScoresTable">
+  <thead>
+    <tr>
+      <th>Username</th>
+      <th>Score</th>
+      <th>Time</th>
+    </tr>
+  </thead>
+  <tbody id="lastScoreTbody"></tbody>
+</table>
+
+
+  </div>
+
+  <script>
+    const loginBtn = document.getElementById('loginBtn');
+    const registerBtn = document.getElementById('registerBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const sendscoreBtn = document.getElementById('submitScoreBtn');//tmp
+    const scoreInput = document.getElementById('score');//tmp
+
+    sendscoreBtn.addEventListener('click', () => {
+      //test score submit
+      submitScore(scoreInput.value);
+    });
+
+    loginBtn.addEventListener('click', () => {
+      const username = usernameInput.value;
+      const password = passwordInput.value;
+      
+      // Send POST request to login endpoint
+      fetch('http://127.0.0.1:3000/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username, password })
+      })
+      .then(response => response.json())
+      .then(data => {
+        // After receiving the response from the login request
+        const { authToken } = data; // Assuming `data` is the response data
+          // Store the token in localStorage
+        localStorage.setItem('authToken', authToken);
+        console.log(data);
+      })
+      .catch(error => {
+        console.error(error);
+      });
+    });
+
+    registerBtn.addEventListener('click', () => {
+      const username = usernameInput.value;
+      const password = passwordInput.value;
+      
+      // Send POST request to register endpoint
+      fetch('http://127.0.0.1:3000/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username, password })
+      })
+      .then(response => response.json())
+      .then(data => {
+        // After receiving the response from the login request
+        const { authToken } = data; // Assuming `data` is the response data
+        // Store the token in localStorage
+        localStorage.setItem('authToken', authToken);
+        console.log(data);
+      })
+      .catch(error => {
+        console.error(error);
+      });
+    });
+
+    logoutBtn.addEventListener('click', () => {
+      const authToken = localStorage.getItem('authToken');
+
+      // Send POST request to logout endpoint
+      fetch('http://127.0.0.1:3000/logout', {
+        method: 'POST',
+            headers: {
+      'Authorization': `${authToken}`}
+      })
+      .then(response => response.json())
+      .then(data => {
+        // Handle the response data
+        console.log(data);
+      })
+      .catch(error => {
+        console.error('error:' + error);
+      });
+    });
+
+function PopulateTables(data){
+      const topScoreTable = document.getElementById('topScoreTable');
+      const topScoreTbody = document.getElementById('topScoreTbody');
+console.log('PopulateTables: ' + JSON.stringify(data));
+      // Clear the table body
+      topScoreTbody.innerHTML = '';
+
+      // Populate the table with top scores
+      data.topScores.forEach((user) => {
+        const row = document.createElement('tr');
+        const usernameCell = document.createElement('td');
+        const scoreCell = document.createElement('td');
+        const dateCell = document.createElement('td');
+
+        usernameCell.textContent = user.username;
+        scoreCell.textContent = user.score;
+        dateCell.textContent = user.datetime;
+
+        row.appendChild(usernameCell);
+        row.appendChild(scoreCell);
+        row.appendChild(dateCell);
+        topScoreTbody.appendChild(row);
+      });
+
+      const lastScoreTable = document.getElementById('lastScoreTable');
+      const lastScoreTbody = document.getElementById('lastScoreTbody');
+
+      lastScoreTbody.innerHTML = '';
+
+      // Populate the table with latest scores
+      data.latestScores.forEach((user) => {
+        const row = document.createElement('tr');
+        const usernameCell = document.createElement('td');
+        const scoreCell = document.createElement('td');
+        const dateCell = document.createElement('td');
+
+        usernameCell.textContent = user.username;
+        scoreCell.textContent = user.score;
+        dateCell.textContent = user.datetime;
+
+        row.appendChild(usernameCell);
+        row.appendChild(scoreCell);
+        row.appendChild(dateCell);
+        lastScoreTbody.appendChild(row);
+      });
+}
+
+// Client-side code
+function populateScores() {
+  fetch('http://127.0.0.1:3000/scores')
+    .then((response) => response.json())
+    .then((data) => {
+      PopulateTables(data);
+    })
+    .catch((error) => {
+      console.error(error);
+    });
+}
+
+
+// Call the function to populate scores on page load or whenever needed
+populateScores();
+
+function submitScore2(score) {
+  const data = { score };
+  const authToken = localStorage.getItem('authToken');
+
+  fetch('http://127.0.0.1:3000/submitscore', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `${authToken}`
+    },
+    body: JSON.stringify(data),
+  })
+    .then(response => response.json())
+    .then(data => {
+      console.log(data);
+      // Score submitted successfully, update the scores table
+      //populateScores();
+    })
+    .catch(error => {
+      console.error(error);
+    });
+}
+
+
+function submitScore (score) {
+  const data = { score };
+  const authToken = localStorage.getItem('authToken');
+
+  fetch('http://127.0.0.1:3000/submitscore', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `${authToken}`
+    },
+    body: JSON.stringify(data),
+  })
+    .then(response => response.json())
+    .then(data => {
+      console.log(data);
+      // Score submitted successfully, update the scores table
+      //populateScores();
+    })
+    .catch(error => {
+      console.error(error);
+    });
+}
+
+// Client-side code
+const sse = new EventSource('http://127.0.0.1:3000/events');
+
+sse.onmessage = function (event) {
+    if (event.id == "CLOSE") {
+      source.close(); 
+      console.log('source.close();');
+      return;
+  }
+console.log('sse.onmessage. event: ' + event);
+  const eventData = event.data;
+console.log('eventData: ' + JSON.stringify(eventData));
+  PopulateTables(JSON.parse(eventData));
+  
+
+};
+
+    </script>
+  </body>
+</html>
